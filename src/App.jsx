@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import FileUploader from './components/FileUploader'
 import ControlsBar from './components/ControlsBar'
 import InsightsDashboard from './components/InsightsDashboard'
 import PreviewTable from './components/PreviewTable'
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+// Prefer env var; otherwise use the provided deployed backend
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'https://r1-c4kf.onrender.com'
 
 export default function App() {
   const [files, setFiles] = useState({})
@@ -23,6 +24,11 @@ export default function App() {
       form.append('format', format)
 
       const res = await fetch(`${API_BASE}/reconcile`, { method: 'POST', body: form })
+
+      if (!res.ok) {
+        const msg = await safeError(res)
+        throw new Error(msg)
+      }
 
       if (format === 'json') {
         const json = await res.json()
@@ -46,12 +52,14 @@ export default function App() {
         formPreview.append('edi940', files.edi940)
         formPreview.append('format', 'json')
         const resPreview = await fetch(`${API_BASE}/reconcile`, { method: 'POST', body: formPreview })
-        const json = await resPreview.json()
-        setRows(json.rows || [])
+        if (resPreview.ok) {
+          const json = await resPreview.json()
+          setRows(json.rows || [])
+        }
       }
     } catch (e) {
       console.error(e)
-      alert('Generation failed. Please verify files and try again.')
+      alert(`Generation failed: ${e.message || 'Please verify files and try again.'}`)
     } finally {
       setBusy(false)
     }
@@ -72,15 +80,16 @@ export default function App() {
       form.append('format', format)
 
       const res = await fetch(`${API_BASE}/send-report`, { method: 'POST', body: form })
-      const json = await res.json()
+      const json = await res.json().catch(() => ({}))
       if (res.ok) {
-        alert(`Email sent to ${json.recipients.join(', ')}`)
+        const recipients = json.recipients || to.split(',').map(s => s.trim())
+        alert(`Email sent to ${recipients.join(', ')}`)
       } else {
         throw new Error(json.detail || 'Email failed')
       }
     } catch (e) {
       console.error(e)
-      alert('Failed to send email. Ensure SMTP settings are configured on the server.')
+      alert(`Failed to send email: ${e.message || 'Ensure SMTP is configured on the server.'}`)
     } finally {
       setBusy(false)
     }
@@ -117,4 +126,13 @@ export default function App() {
       </div>
     </div>
   )
+}
+
+async function safeError(res) {
+  try {
+    const data = await res.json()
+    return data?.detail || JSON.stringify(data)
+  } catch (_) {
+    return `${res.status} ${res.statusText}`
+  }
 }
